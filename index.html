@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>AI Knowledge System</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+
+<style>
+body{font-family:Arial;margin:0;background:#f4f4f4}
+header{background:#c40000;color:#fff;padding:15px;text-align:center;font-size:22px}
+.container{max-width:900px;margin:auto;padding:15px}
+.card{background:#fff;padding:15px;border-radius:12px;margin-bottom:12px;box-shadow:0 2px 6px rgba(0,0,0,.1)}
+input,textarea,select{width:100%;padding:10px;margin-top:8px;border-radius:8px;border:1px solid #ccc}
+button{background:#c40000;color:#fff;border:none;padding:10px;border-radius:8px;margin-top:8px;cursor:pointer}
+.hidden{display:none}
+.search-row{display:flex;gap:10px}
+.dark{background:#111;color:#fff}
+.dark .card{background:#1e1e1e}
+#dropZone{border:2px dashed #aaa;padding:20px;text-align:center;border-radius:10px;margin-top:10px}
+mark{background:yellow}
+</style>
+</head>
+<body>
+
+<header>AI Knowledge System</header>
+
+<div class="container">
+
+<div id="loginCard" class="card">
+<h3>Admin Login</h3>
+<input id="user" placeholder="Username">
+<input id="pass" type="password" placeholder="Password">
+<button onclick="login()">Login</button>
+</div>
+
+<div id="adminPanel" class="card hidden">
+<button onclick="logout()" style="float:right;background:black">Logout</button>
+
+<h3>Upload Knowledge</h3>
+
+<select id="category">
+<option>General</option>
+<option>Policies</option>
+<option>Guides</option>
+<option>Reports</option>
+</select>
+
+<textarea id="textKnowledge" rows="4" placeholder="Paste text..."></textarea>
+
+<input type="file" id="fileKnowledge" multiple>
+
+<div id="dropZone">Drop files here</div>
+
+<button onclick="addKnowledge()">Save</button>
+
+<hr>
+<div id="knowledgeList"></div>
+</div>
+
+<div class="card">
+<h3>Search</h3>
+<div class="search-row">
+<input id="searchInput">
+<button onclick="searchKB()">Search</button>
+</div>
+<div id="searchResults"></div>
+</div>
+
+<div class="card">
+<h3>AI Chat</h3>
+<div id="chatBox"></div>
+<div class="search-row">
+<input id="chatInput">
+<button onclick="askAI()">Send</button>
+</div>
+</div>
+
+<button onclick="toggleDark()">Dark Mode</button>
+
+</div>
+
+<script>
+
+///////////////////////////////////////////////////////////////
+////////// 🔑 INSERT YOUR OPENAI API KEY RIGHT HERE //////////
+///////////////////////////////////////////////////////////////
+
+const OPENAI_API_KEY = "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";
+
+///////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+
+
+// login
+const ADMIN_USER="admin";
+const ADMIN_HASH="240be518fabd2724ddb6f04eeb4f1b2e";
+
+let KB=JSON.parse(localStorage.getItem("KB")||"[]");
+let EMBEDS=JSON.parse(localStorage.getItem("EMBEDS")||"[]");
+
+async function hash(t){
+const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(t));
+return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+
+async function login(){
+if(user.value!==ADMIN_USER)return alert("Wrong login");
+if(await hash(pass.value)===ADMIN_HASH){
+sessionStorage.setItem("admin","1");
+loginCard.classList.add("hidden");
+adminPanel.classList.remove("hidden");
+renderKB();
+}else alert("Wrong login");
+}
+
+if(sessionStorage.getItem("admin")){
+loginCard.classList.add("hidden");
+adminPanel.classList.remove("hidden");
+}
+
+function logout(){sessionStorage.clear();location.reload();}
+
+function save(){
+localStorage.setItem("KB",JSON.stringify(KB));
+localStorage.setItem("EMBEDS",JSON.stringify(EMBEDS));
+}
+
+// embeddings
+async function embed(text){
+const r=await fetch("https://api.openai.com/v1/embeddings",{
+method:"POST",
+headers:{
+"Content-Type":"application/json",
+"Authorization":`Bearer ${OPENAI_API_KEY}`
+},
+body:JSON.stringify({
+model:"text-embedding-3-small",
+input:text
+})
+});
+return (await r.json()).data[0].embedding;
+}
+
+// summarize
+async function summarize(text){
+const r=await fetch("https://api.openai.com/v1/chat/completions",{
+method:"POST",
+headers:{
+"Content-Type":"application/json",
+"Authorization":`Bearer ${OPENAI_API_KEY}`
+},
+body:JSON.stringify({
+model:"gpt-4o-mini",
+messages:[
+{role:"system",content:"Summarize this:"},
+{role:"user",content:text.slice(0,6000)}
+]
+})
+});
+return (await r.json()).choices[0].message.content;
+}
+
+// file readers
+async function readPDF(file){
+const buf=await file.arrayBuffer();
+const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+let text="";
+for(let i=1;i<=pdf.numPages;i++){
+const page=await pdf.getPage(i);
+const c=await page.getTextContent();
+text+=c.items.map(s=>s.str).join(" ");
+}
+return text;
+}
+
+async function readDOCX(file){
+return (await mammoth.extractRawText({arrayBuffer:await file.arrayBuffer()})).value;
+}
+
+async function readFile(file){
+if(file.name.endsWith(".pdf"))return readPDF(file);
+if(file.name.endsWith(".docx"))return readDOCX(file);
+return file.text();
+}
+
+// add knowledge
+async function addKnowledge(filesDrop=null){
+
+const cat=category.value;
+
+async function process(text,name="Manual"){
+const sum=await summarize(text);
+KB.push({text:text,category:cat,source:name,summary:sum});
+EMBEDS.push(await embed(text));
+}
+
+if(textKnowledge.value.trim()){
+await process(textKnowledge.value);
+textKnowledge.value="";
+}
+
+const files=filesDrop||fileKnowledge.files;
+for(const f of files){
+await process(await readFile(f),f.name);
+}
+
+save();
+renderKB();
+alert("Saved!");
+}
+
+// drag drop
+dropZone.addEventListener("dragover",e=>{
+e.preventDefault();
+dropZone.style.background="#eee";
+});
+dropZone.addEventListener("dragleave",()=>dropZone.style.background="");
+dropZone.addEventListener("drop",e=>{
+e.preventDefault();
+dropZone.style.background="";
+addKnowledge(e.dataTransfer.files);
+});
+
+// render
+function renderKB(){
+knowledgeList.innerHTML=KB.map(k=>`
+<div class='card'>
+<b>${k.source}</b> (${k.category})<br>
+${k.summary}
+</div>`).join("");
+}
+
+// cosine similarity
+function cos(a,b){
+let d=0,A=0,B=0;
+for(let i=0;i<a.length;i++){
+d+=a[i]*b[i];
+A+=a[i]*a[i];
+B+=b[i]*b[i];
+}
+return d/(Math.sqrt(A)*Math.sqrt(B));
+}
+
+// search
+async function searchKB(){
+const q=searchInput.value.trim();
+if(!q)return;
+
+const qv=await embed(q);
+
+const ranked=EMBEDS.map((v,i)=>({
+item:KB[i],
+score:cos(v,qv)
+}))
+.sort((a,b)=>b.score-a.score)
+.slice(0,5);
+
+searchResults.innerHTML=ranked.map(r=>{
+const t=r.item.text.substring(0,400)
+.replace(new RegExp(q,"gi"),m=>`<mark>${m}</mark>`);
+
+return `<div class='card'>
+<b>${r.item.source}</b> (${r.item.category})<br>
+${t}
+</div>`;
+}).join("");
+}
+
+// chatbot
+async function askAI(){
+const q=chatInput.value;
+if(!q)return;
+
+chatBox.innerHTML+=`<p><b>You:</b> ${q}</p>`;
+
+const qv=await embed(q);
+
+let best=0,score=-1;
+EMBEDS.forEach((v,i)=>{
+let s=cos(v,qv);
+if(s>score){score=s;best=i;}
+});
+
+const context=KB[best].text;
+
+const r=await fetch("https://api.openai.com/v1/chat/completions",{
+method:"POST",
+headers:{
+"Content-Type":"application/json",
+"Authorization":`Bearer ${OPENAI_API_KEY}`
+},
+body:JSON.stringify({
+model:"gpt-4o-mini",
+messages:[
+{role:"system",content:`Answer ONLY using this knowledge.
+If not found say "Not in knowledge base".
+Quote exact sentence.
+
+${context}`},
+{role:"user",content:q}
+]
+})
+});
+
+const reply=(await r.json()).choices[0].message.content;
+
+chatBox.innerHTML+=`<p><b>AI:</b> ${reply}</p>`;
+chatInput.value="";
+}
+
+function toggleDark(){document.body.classList.toggle("dark");}
+
+</script>
+</body>
+</html>
