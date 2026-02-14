@@ -94,23 +94,38 @@ const OPENAI_API_KEY = "sk-svcacct-8qWaKQ8HY1-vlmy2vYRg874XqoVkRtAZ0LrIpjtrhrOdi
 
 
 // login
-const ADMIN_USER="admin";
-const ADMIN_HASH="ef92b778bafe771e89245b89ecbcf4cbb8df3c4d6e5c0f0f9d6a3e6d9f3b5f3c";
-
-let KB=JSON.parse(localStorage.getItem("KB")||"[]");
-let EMBEDS=JSON.parse(localStorage.getItem("EMBEDS")||"[]");
-
-async function hash(t){
-const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(t));
-return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("");
-}
+// SIMPLE LOGIN SYSTEM
+const ADMIN_USER = "admin";
+const ADMIN_PASS = "1234";
 
 function login(){
- if(user.value==="admin" && pass.value==="admin123"){
+
+ if(user.value === ADMIN_USER && pass.value === ADMIN_PASS){
+
   sessionStorage.setItem("admin","1");
+
   loginCard.classList.add("hidden");
   adminPanel.classList.remove("hidden");
- } else alert("Wrong login");
+
+ } else {
+
+  alert("Wrong login");
+
+ }
+}
+
+// keep admin logged in after refresh
+if(sessionStorage.getItem("admin")){
+ loginCard.classList.add("hidden");
+ adminPanel.classList.remove("hidden");
+}
+
+// logout
+function logout(){
+ sessionStorage.removeItem("admin");
+ location.reload();
+}
+
 }
 
 if(sessionStorage.getItem("admin")){
@@ -313,5 +328,6 @@ function toggleDark(){document.body.classList.toggle("dark");}
 </script>
 </body>
 </html>
+
 
 
