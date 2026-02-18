@@ -2,7 +2,10 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Agent Knowledge Base</title>
+<title>AI Knowledge System</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
 
 <style>
 body{font-family:Arial;margin:0;background:#f4f4f4}
@@ -11,24 +14,25 @@ header{background:#c40000;color:#fff;padding:15px;text-align:center;font-size:22
 .card{background:#fff;padding:15px;border-radius:12px;margin-bottom:12px;box-shadow:0 2px 6px rgba(0,0,0,.1)}
 input,textarea,select{width:100%;padding:10px;margin-top:8px;border-radius:8px;border:1px solid #ccc}
 button{background:#c40000;color:#fff;border:none;padding:10px;border-radius:8px;margin-top:8px;cursor:pointer}
-button.black{background:black}
 .hidden{display:none}
 .search-row{display:flex;gap:10px}
 .dark{background:#111;color:#fff}
 .dark .card{background:#1e1e1e}
+#dropZone{border:2px dashed #aaa;padding:20px;text-align:center;border-radius:10px;margin-top:10px}
 mark{background:yellow}
-.entry{border-bottom:1px solid #ddd;padding:10px 0}
-.entry:last-child{border:none}
-.small{font-size:12px;color:gray}
+
+/* NEW: preserve formatting */
+.preserve{
+  white-space:pre-wrap;
+}
 </style>
 </head>
 <body>
 
-<header>Agent Knowledge Base</header>
+<header>AI Knowledge System</header>
 
 <div class="container">
 
-<!-- LOGIN -->
 <div id="loginCard" class="card">
 <h3>Admin Login</h3>
 <input id="user" placeholder="Username">
@@ -36,39 +40,46 @@ mark{background:yellow}
 <button onclick="login()">Login</button>
 </div>
 
-<!-- ADMIN PANEL -->
 <div id="adminPanel" class="card hidden">
-<button onclick="logout()" class="black" style="float:right">Logout</button>
+<button onclick="logout()" style="float:right;background:black">Logout</button>
 
-<h3>Add Knowledge</h3>
+<h3>Upload Knowledge</h3>
 
 <select id="category">
 <option>General</option>
 <option>Policies</option>
 <option>Guides</option>
-<option>FAQ</option>
-<option>Technical</option>
+<option>Reports</option>
 </select>
 
-<input id="title" placeholder="Title">
+<textarea id="textKnowledge" rows="4" placeholder="Paste text..."></textarea>
 
-<textarea id="content" rows="6" placeholder="Paste knowledge here..."></textarea>
+<input type="file" id="fileKnowledge" multiple>
 
-<button onclick="addKnowledge()">Save Knowledge</button>
+<div id="dropZone">Drop files here</div>
+
+<button onclick="addKnowledge()">Save</button>
 
 <hr>
-<h3>Stored Knowledge</h3>
 <div id="knowledgeList"></div>
 </div>
 
-<!-- SEARCH AREA -->
 <div class="card">
-<h3>Agent Search</h3>
+<h3>Search</h3>
 <div class="search-row">
-<input id="searchInput" placeholder="Ask a question...">
+<input id="searchInput">
 <button onclick="searchKB()">Search</button>
 </div>
 <div id="searchResults"></div>
+</div>
+
+<div class="card">
+<h3>AI Chat</h3>
+<div id="chatBox"></div>
+<div class="search-row">
+<input id="chatInput">
+<button onclick="askAI()">Send</button>
+</div>
 </div>
 
 <button onclick="toggleDark()">Dark Mode</button>
@@ -77,132 +88,235 @@ mark{background:yellow}
 
 <script>
 
-// 🔐 ADMIN LOGIN
-const ADMIN_USER = "admin";
-const ADMIN_HASH = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4";
+/* INSERT NEW OPENAI KEY */
+const OPENAI_API_KEY = "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";
 
-let KB = JSON.parse(localStorage.getItem("KB") || "[]");
+/* LOGIN */
+const ADMIN_USER="admin";
+const ADMIN_HASH="240be518fabd2724ddb6f04eeb4f1b2e";
 
-// SHA-256
-async function hash(text){
-const buffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-return Array.from(new Uint8Array(buffer)).map(b=>b.toString(16).padStart(2,"0")).join("");
+let KB=JSON.parse(localStorage.getItem("KB")||"[]");
+let EMBEDS=JSON.parse(localStorage.getItem("EMBEDS")||"[]");
+
+async function hash(t){
+const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(t));
+return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("");
 }
 
-// LOGIN
 async function login(){
-if(user.value !== ADMIN_USER) return alert("Wrong username");
-
-if(await hash(pass.value) === ADMIN_HASH){
+if(user.value!==ADMIN_USER)return alert("Wrong login");
+if(await hash(pass.value)===ADMIN_HASH){
 sessionStorage.setItem("admin","1");
 loginCard.classList.add("hidden");
 adminPanel.classList.remove("hidden");
-renderAdmin();
-} else {
-alert("Wrong password");
-}
+renderKB();
+}else alert("Wrong login");
 }
 
-// AUTO LOGIN IF SESSION EXISTS
 if(sessionStorage.getItem("admin")){
 loginCard.classList.add("hidden");
 adminPanel.classList.remove("hidden");
-renderAdmin();
 }
 
-function logout(){
-sessionStorage.clear();
-location.reload();
-}
+function logout(){sessionStorage.clear();location.reload();}
 
-// SAVE STORAGE
 function save(){
-localStorage.setItem("KB", JSON.stringify(KB));
+localStorage.setItem("KB",JSON.stringify(KB));
+localStorage.setItem("EMBEDS",JSON.stringify(EMBEDS));
 }
 
-// ADD KNOWLEDGE
-function addKnowledge(){
-
-if(!title.value.trim() || !content.value.trim()){
-alert("Title and content required");
-return;
+/* EMBEDDINGS */
+async function embed(text){
+const r=await fetch("https://api.openai.com/v1/embeddings",{
+method:"POST",
+headers:{
+"Content-Type":"application/json",
+"Authorization":`Bearer ${OPENAI_API_KEY}`
+},
+body:JSON.stringify({
+model:"text-embedding-3-small",
+input:text
+})
+});
+return (await r.json()).data[0].embedding;
 }
 
-KB.push({
-title: title.value,
-category: category.value,
-content: content.value,
-date: new Date().toLocaleString()
+/* SUMMARIZE */
+async function summarize(text){
+const r=await fetch("https://api.openai.com/v1/chat/completions",{
+method:"POST",
+headers:{
+"Content-Type":"application/json",
+"Authorization":`Bearer ${OPENAI_API_KEY}`
+},
+body:JSON.stringify({
+model:"gpt-4o-mini",
+messages:[
+{role:"system",content:"Summarize this:"},
+{role:"user",content:text.slice(0,6000)}
+]
+})
+});
+return (await r.json()).choices[0].message.content;
+}
+
+/* FILE READERS */
+async function readPDF(file){
+const buf=await file.arrayBuffer();
+const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+let text="";
+for(let i=1;i<=pdf.numPages;i++){
+const page=await pdf.getPage(i);
+const c=await page.getTextContent();
+text+=c.items.map(s=>s.str).join(" ");
+}
+return text;
+}
+
+async function readDOCX(file){
+return (await mammoth.extractRawText({arrayBuffer:await file.arrayBuffer()})).value;
+}
+
+async function readFile(file){
+if(file.name.endsWith(".pdf"))return readPDF(file);
+if(file.name.endsWith(".docx"))return readDOCX(file);
+return file.text();
+}
+
+/* ADD KNOWLEDGE */
+async function addKnowledge(filesDrop=null){
+
+const cat=category.value;
+
+async function process(text,name="Manual"){
+const sum=await summarize(text);
+KB.push({text:text,category:cat,source:name,summary:sum});
+EMBEDS.push(await embed(text));
+}
+
+if(textKnowledge.value.trim()){
+await process(textKnowledge.value);
+textKnowledge.value="";
+}
+
+const files=filesDrop||fileKnowledge.files;
+for(const f of files){
+await process(await readFile(f),f.name);
+}
+
+save();
+renderKB();
+alert("Saved!");
+}
+
+/* DRAG DROP */
+dropZone.addEventListener("dragover",e=>{
+e.preventDefault();
+dropZone.style.background="#eee";
+});
+dropZone.addEventListener("dragleave",()=>dropZone.style.background="");
+dropZone.addEventListener("drop",e=>{
+e.preventDefault();
+dropZone.style.background="";
+addKnowledge(e.dataTransfer.files);
 });
 
-save();
-renderAdmin();
-
-title.value="";
-content.value="";
-
-alert("Knowledge Saved!");
+/* RENDER KB */
+function renderKB(){
+knowledgeList.innerHTML=KB.map(k=>`
+<div class='card'>
+<b>${k.source}</b> (${k.category})<br>
+<div class="preserve">${k.summary}</div>
+</div>`).join("");
 }
 
-// RENDER ADMIN LIST
-function renderAdmin(){
-knowledgeList.innerHTML = KB.map((k,i)=>`
-<div class="entry">
-<b>${k.title}</b> (${k.category})<br>
-<div class="small">${k.date}</div>
-<button onclick="deleteItem(${i})" style="background:black;margin-top:5px">Delete</button>
-</div>
-`).join("");
+/* COSINE */
+function cos(a,b){
+let d=0,A=0,B=0;
+for(let i=0;i<a.length;i++){
+d+=a[i]*b[i];
+A+=a[i]*a[i];
+B+=b[i]*b[i];
+}
+return d/(Math.sqrt(A)*Math.sqrt(B));
 }
 
-// DELETE
-function deleteItem(i){
-if(confirm("Delete this entry?")){
-KB.splice(i,1);
-save();
-renderAdmin();
-}
+/* SEARCH */
+async function searchKB(){
+const q=searchInput.value.trim();
+if(!q)return;
+
+const qv=await embed(q);
+
+const ranked=EMBEDS.map((v,i)=>({
+item:KB[i],
+score:cos(v,qv)
+}))
+.sort((a,b)=>b.score-a.score)
+.slice(0,5);
+
+searchResults.innerHTML=ranked.map(r=>{
+const t=r.item.text.substring(0,400)
+.replace(new RegExp(q,"gi"),m=>`<mark>${m}</mark>`);
+
+return `<div class='card'>
+<b>${r.item.source}</b> (${r.item.category})<br>
+<div class="preserve">${t}</div>
+</div>`;
+}).join("");
 }
 
-// SEARCH FUNCTION (SMART TEXT SEARCH)
-function searchKB(){
-
-const q = searchInput.value.toLowerCase().trim();
+/* SMART AI CHAT (TOP 3 CONTEXT) */
+async function askAI(){
+const q = chatInput.value.trim();
 if(!q) return;
 
-const results = KB.filter(k =>
-k.title.toLowerCase().includes(q) ||
-k.content.toLowerCase().includes(q) ||
-k.category.toLowerCase().includes(q)
-);
+chatBox.innerHTML += `<p><b>You:</b> ${q}</p>`;
 
-if(results.length === 0){
-searchResults.innerHTML = "<div class='card'>No results found.</div>";
-return;
+const qv = await embed(q);
+
+const ranked = EMBEDS.map((v,i)=>({
+text: KB[i].text,
+score: cos(v,qv)
+}))
+.sort((a,b)=>b.score-a.score)
+.slice(0,3);
+
+const context = ranked.map(r=>r.text).join("\n\n---\n\n");
+
+const r = await fetch("https://api.openai.com/v1/chat/completions",{
+method:"POST",
+headers:{
+"Content-Type":"application/json",
+"Authorization":`Bearer ${OPENAI_API_KEY}`
+},
+body:JSON.stringify({
+model:"gpt-4o-mini",
+messages:[
+{
+role:"system",
+content:`You are a knowledge base assistant.
+
+RULES:
+- Answer ONLY from the provided knowledge.
+- If not found, reply: "Not in knowledge base".
+- Keep original wording when possible.
+
+KNOWLEDGE:
+${context}`
+},
+{role:"user",content:q}
+]
+})
+});
+
+const reply = (await r.json()).choices[0].message.content;
+
+chatBox.innerHTML += `<p><b>AI:</b> ${reply}</p>`;
+chatInput.value="";
 }
 
-searchResults.innerHTML = results.map(k=>{
-
-let highlighted = k.content.replace(
-new RegExp(q,"gi"),
-m=>`<mark>${m}</mark>`
-);
-
-return `
-<div class="card">
-<b>${k.title}</b> (${k.category})<br><br>
-${highlighted}
-</div>
-`;
-
-}).join("");
-
-}
-
-// DARK MODE
-function toggleDark(){
-document.body.classList.toggle("dark");
-}
+function toggleDark(){document.body.classList.toggle("dark");}
 
 </script>
 </body>
