@@ -20,11 +20,6 @@ button{background:#c40000;color:#fff;border:none;padding:10px;border-radius:8px;
 .dark .card{background:#1e1e1e}
 #dropZone{border:2px dashed #aaa;padding:20px;text-align:center;border-radius:10px;margin-top:10px}
 mark{background:yellow}
-
-/* NEW: preserve formatting */
-.preserve{
-  white-space:pre-wrap;
-}
 </style>
 </head>
 <body>
@@ -88,10 +83,17 @@ mark{background:yellow}
 
 <script>
 
-/* INSERT NEW OPENAI KEY */
-const OPENAI_API_KEY = "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";
+///////////////////////////////////////////////////////////////
+////////// 🔑 INSERT YOUR OPENAI API KEY RIGHT HERE //////////
+///////////////////////////////////////////////////////////////
 
-/* LOGIN */
+const OPENAI_API_KEY = "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";
+
+///////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+
+
+// login
 const ADMIN_USER="admin";
 const ADMIN_HASH="240be518fabd2724ddb6f04eeb4f1b2e";
 
@@ -125,7 +127,7 @@ localStorage.setItem("KB",JSON.stringify(KB));
 localStorage.setItem("EMBEDS",JSON.stringify(EMBEDS));
 }
 
-/* EMBEDDINGS */
+// embeddings
 async function embed(text){
 const r=await fetch("https://api.openai.com/v1/embeddings",{
 method:"POST",
@@ -141,7 +143,7 @@ input:text
 return (await r.json()).data[0].embedding;
 }
 
-/* SUMMARIZE */
+// summarize
 async function summarize(text){
 const r=await fetch("https://api.openai.com/v1/chat/completions",{
 method:"POST",
@@ -160,7 +162,7 @@ messages:[
 return (await r.json()).choices[0].message.content;
 }
 
-/* FILE READERS */
+// file readers
 async function readPDF(file){
 const buf=await file.arrayBuffer();
 const pdf=await pdfjsLib.getDocument({data:buf}).promise;
@@ -183,7 +185,7 @@ if(file.name.endsWith(".docx"))return readDOCX(file);
 return file.text();
 }
 
-/* ADD KNOWLEDGE */
+// add knowledge
 async function addKnowledge(filesDrop=null){
 
 const cat=category.value;
@@ -209,7 +211,7 @@ renderKB();
 alert("Saved!");
 }
 
-/* DRAG DROP */
+// drag drop
 dropZone.addEventListener("dragover",e=>{
 e.preventDefault();
 dropZone.style.background="#eee";
@@ -221,16 +223,16 @@ dropZone.style.background="";
 addKnowledge(e.dataTransfer.files);
 });
 
-/* RENDER KB */
+// render
 function renderKB(){
 knowledgeList.innerHTML=KB.map(k=>`
 <div class='card'>
 <b>${k.source}</b> (${k.category})<br>
-<div class="preserve">${k.summary}</div>
+${k.summary}
 </div>`).join("");
 }
 
-/* COSINE */
+// cosine similarity
 function cos(a,b){
 let d=0,A=0,B=0;
 for(let i=0;i<a.length;i++){
@@ -241,7 +243,7 @@ B+=b[i]*b[i];
 return d/(Math.sqrt(A)*Math.sqrt(B));
 }
 
-/* SEARCH */
+// search
 async function searchKB(){
 const q=searchInput.value.trim();
 if(!q)return;
@@ -261,30 +263,29 @@ const t=r.item.text.substring(0,400)
 
 return `<div class='card'>
 <b>${r.item.source}</b> (${r.item.category})<br>
-<div class="preserve">${t}</div>
+${t}
 </div>`;
 }).join("");
 }
 
-/* SMART AI CHAT (TOP 3 CONTEXT) */
+// chatbot
 async function askAI(){
-const q = chatInput.value.trim();
-if(!q) return;
+const q=chatInput.value;
+if(!q)return;
 
-chatBox.innerHTML += `<p><b>You:</b> ${q}</p>`;
+chatBox.innerHTML+=`<p><b>You:</b> ${q}</p>`;
 
-const qv = await embed(q);
+const qv=await embed(q);
 
-const ranked = EMBEDS.map((v,i)=>({
-text: KB[i].text,
-score: cos(v,qv)
-}))
-.sort((a,b)=>b.score-a.score)
-.slice(0,3);
+let best=0,score=-1;
+EMBEDS.forEach((v,i)=>{
+let s=cos(v,qv);
+if(s>score){score=s;best=i;}
+});
 
-const context = ranked.map(r=>r.text).join("\n\n---\n\n");
+const context=KB[best].text;
 
-const r = await fetch("https://api.openai.com/v1/chat/completions",{
+const r=await fetch("https://api.openai.com/v1/chat/completions",{
 method:"POST",
 headers:{
 "Content-Type":"application/json",
@@ -293,26 +294,19 @@ headers:{
 body:JSON.stringify({
 model:"gpt-4o-mini",
 messages:[
-{
-role:"system",
-content:`You are a knowledge base assistant.
+{role:"system",content:`Answer ONLY using this knowledge.
+If not found say "Not in knowledge base".
+Quote exact sentence.
 
-RULES:
-- Answer ONLY from the provided knowledge.
-- If not found, reply: "Not in knowledge base".
-- Keep original wording when possible.
-
-KNOWLEDGE:
-${context}`
-},
+${context}`},
 {role:"user",content:q}
 ]
 })
 });
 
-const reply = (await r.json()).choices[0].message.content;
+const reply=(await r.json()).choices[0].message.content;
 
-chatBox.innerHTML += `<p><b>AI:</b> ${reply}</p>`;
+chatBox.innerHTML+=`<p><b>AI:</b> ${reply}</p>`;
 chatInput.value="";
 }
 
